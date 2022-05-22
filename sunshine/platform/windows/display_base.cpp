@@ -15,14 +15,31 @@ namespace platf {
 using namespace std::literals;
 }
 namespace platf::dxgi {
-capture_e duplication_t::next_frame(DXGI_OUTDUPL_FRAME_INFO &frame_info, std::chrono::milliseconds timeout, resource_t::pointer *res_p) {
+capture_e duplication_t::next_frame(DXGI_OUTDUPL_FRAME_INFO &frame_info, std::chrono::milliseconds timeout, resource_t::pointer *res_p, device_ctx_t &device_ctx, device_t &device, output_t &output) {
+  D3D11_QUERY_DESC queryDesc;
+  ID3D11Query * pQuery = NULL;
+
   auto capture_status = release_frame();
   if(capture_status != capture_e::ok) {
     return capture_status;
   }
 
   if(use_dwmflush) {
-    DwmFlush();
+    //DwmFlush();
+  }
+
+  device_ctx->Flush();
+  ZeroMemory(&queryDesc, sizeof(queryDesc));
+  queryDesc.Query = D3D11_QUERY_EVENT;
+  // When the GPU is finished, ID3D11DeviceContext::GetData will return S_OK.
+  // When using this type of query, ID3D11DeviceContext::Begin is disabled.
+  ZeroMemory(&queryDesc, sizeof(queryDesc));
+  queryDesc.Query = D3D11_QUERY_EVENT;
+  device->CreateQuery(&queryDesc, &pQuery);
+  if (pQuery) {
+    device_ctx->End(pQuery);
+    while (S_OK != device_ctx->GetData(pQuery, NULL, 0, 0));
+    pQuery->Release();
   }
 
   auto status = dup->AcquireNextFrame(timeout.count(), &frame_info, res_p);

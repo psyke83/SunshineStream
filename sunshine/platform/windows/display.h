@@ -98,7 +98,7 @@ public:
   bool has_frame {};
   bool use_dwmflush {};
 
-  capture_e next_frame(DXGI_OUTDUPL_FRAME_INFO &frame_info, std::chrono::milliseconds timeout, resource_t::pointer *res_p);
+  capture_e next_frame(DXGI_OUTDUPL_FRAME_INFO &frame_info, std::chrono::milliseconds timeout, resource_t::pointer *res_p, device_ctx_t &device_ctx, device_t &device, output_t &output);
   capture_e reset(dup_t::pointer dup_p = dup_t::pointer());
   capture_e release_frame();
 

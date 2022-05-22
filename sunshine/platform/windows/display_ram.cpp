@@ -203,7 +203,7 @@ capture_e display_ram_t::snapshot(::platf::img_t *img_base, std::chrono::millise
   DXGI_OUTDUPL_FRAME_INFO frame_info;
 
   resource_t::pointer res_p {};
-  auto capture_status = dup.next_frame(frame_info, timeout, &res_p);
+  auto capture_status = dup.next_frame(frame_info, timeout, &res_p, device_ctx, device, output);
   resource_t res { res_p };
 
   if(capture_status != capture_e::ok) {
