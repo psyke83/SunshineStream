@@ -536,6 +536,9 @@ namespace platf::dxgi {
       return -1;
     }
 
+    // use nearest scaling for client resolutions that are evenly divisible by host resolution
+    config::video.filtering = !(config.width % env_width == 0 && config.height % env_height == 0);
+
     DXGI_ADAPTER_DESC adapter_desc;
     adapter->GetDesc(&adapter_desc);
 
@@ -551,7 +554,8 @@ namespace platf::dxgi {
       << "Feature Level      : 0x"sv << util::hex(feature_level).to_string_view() << std::endl
       << "Capture size       : "sv << width << 'x' << height << std::endl
       << "Offset             : "sv << offset_x << 'x' << offset_y << std::endl
-      << "Virtual Desktop    : "sv << env_width << 'x' << env_height;
+      << "Virtual Desktop    : "sv << env_width << 'x' << env_height << std::endl
+      << "Bilinear scaling   : "sv << std::boolalpha << config::video.filtering;
 
     // Bump up thread priority
     {

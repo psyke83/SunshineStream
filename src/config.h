@@ -68,6 +68,7 @@ namespace config {
     std::string encoder;
     std::string adapter_name;
     std::string output_name;
+    bool filtering;
   };
 
   struct audio_t {

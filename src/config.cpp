@@ -358,10 +358,11 @@ namespace config {
       -1,
     },  // vt
 
-    {},  // capture
-    {},  // encoder
-    {},  // adapter_name
-    {},  // output_name
+    {},   // capture
+    {},   // encoder
+    {},   // adapter_name
+    {},   // output_name
+    true, // filtering
   };
 
   audio_t audio {

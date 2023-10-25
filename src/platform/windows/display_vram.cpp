@@ -633,7 +633,7 @@ namespace platf::dxgi {
       }
 
       D3D11_SAMPLER_DESC sampler_desc {};
-      sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+      sampler_desc.Filter = config::video.filtering ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_MIN_MAG_MIP_POINT;
       sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
       sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
       sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -1330,7 +1330,7 @@ namespace platf::dxgi {
     }
 
     D3D11_SAMPLER_DESC sampler_desc {};
-    sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sampler_desc.Filter = config::video.filtering ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_MIN_MAG_MIP_POINT;
     sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
     sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
     sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
