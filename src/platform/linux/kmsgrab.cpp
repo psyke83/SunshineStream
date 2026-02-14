@@ -1180,7 +1180,11 @@ namespace platf {
         sleep_overshoot_logger.reset();
 
         while (true) {
+          // Advance target frame interval without resyncing away from original timeline
           auto now = std::chrono::steady_clock::now();
+          while (next_frame <= now) {
+            next_frame += delay;
+          }
 
           if (next_frame > now) {
             std::this_thread::sleep_for(next_frame - now);
@@ -1188,13 +1192,17 @@ namespace platf {
             sleep_overshoot_logger.second_point_now_and_log();
           }
 
-          next_frame += delay;
-          if (next_frame < now) {  // some major slowdown happened; we couldn't keep up
-            next_frame = now + delay;
-          }
-
+          // Capture frame
           std::shared_ptr<platf::img_t> img_out;
           auto status = snapshot(pull_free_image_cb, img_out, 1000ms, *cursor);
+
+          // Treat frames arriving at 50% of delay interval as a timeout
+          auto capture_end = std::chrono::steady_clock::now();
+          auto deadline = next_frame + (delay / 2);
+          if (capture_end > deadline) {
+            status = platf::capture_e::timeout;
+          }
+
           switch (status) {
             case platf::capture_e::reinit:
             case platf::capture_e::error:
@@ -1394,7 +1402,11 @@ namespace platf {
         sleep_overshoot_logger.reset();
 
         while (true) {
+          // Advance target frame interval without resyncing away from original timeline
           auto now = std::chrono::steady_clock::now();
+          while (next_frame <= now) {
+            next_frame += delay;
+          }
 
           if (next_frame > now) {
             std::this_thread::sleep_for(next_frame - now);
@@ -1402,13 +1414,17 @@ namespace platf {
             sleep_overshoot_logger.second_point_now_and_log();
           }
 
-          next_frame += delay;
-          if (next_frame < now) {  // some major slowdown happened; we couldn't keep up
-            next_frame = now + delay;
-          }
-
+          // Capture frame
           std::shared_ptr<platf::img_t> img_out;
           auto status = snapshot(pull_free_image_cb, img_out, 1000ms, *cursor);
+
+          // Treat frames arriving at 50% of delay interval as a timeout
+          auto capture_end = std::chrono::steady_clock::now();
+          auto deadline = next_frame + (delay / 2);
+          if (capture_end > deadline) {
+            status = platf::capture_e::timeout;
+          }
+
           switch (status) {
             case platf::capture_e::reinit:
             case platf::capture_e::error:
