@@ -65,6 +65,13 @@ namespace portal {
   void clear_saved_token();
 
   /**
+   * @brief Get path of restore token on filesystem.
+   *
+   * @return Path of token that includes portal implementation as suffix (e.g. .gnome, .kde)
+   */
+  std::string get_saved_token_path();
+
+  /**
    * @brief Check if the Portal service responds to a DBus Ping within 2 seconds.
    *
    * @return True if the Portal is reachable.

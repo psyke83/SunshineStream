@@ -27,6 +27,10 @@
 #include <Simple-Web-Server/crypto.hpp>
 #include <Simple-Web-Server/server_https.hpp>
 
+// platform includes
+#ifdef __linux__
+  #include <src/platform/linux/misc.h>
+#endif
 #ifdef _WIN32
   #include "platform/virtualhid_input.h"
   #include "platform/windows/misc.h"
@@ -114,11 +118,19 @@ namespace confighttp {
     auto &portal_token_path_provider() {
   #ifdef SUNSHINE_TESTS
       static portal_token_path_provider_t path_provider = []() {
+    #ifdef SUNSHINE_BUILD_PORTAL
+        return portal::get_saved_token_path();
+    #else
         return platf::appdata() / "portal_token";
+    #endif
       };
   #else
       static const portal_token_path_provider_t path_provider = []() {
+    #ifdef SUNSHINE_BUILD_PORTAL
+        return portal::get_saved_token_path();
+    #else
         return platf::appdata() / "portal_token";
+    #endif
       };
   #endif
       return path_provider;
@@ -177,7 +189,11 @@ namespace confighttp {
 
   void reset_portal_token_path_provider_for_testing() {
     portal_token_path_provider() = []() {
+  #ifdef SUNSHINE_BUILD_PORTAL
+      return portal::get_saved_token_path();
+  #else
       return platf::appdata() / "portal_token";
+  #endif
     };
   }
 

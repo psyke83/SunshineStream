@@ -99,6 +99,15 @@ namespace portal {
     }
 
     /**
+     * @brief Get path of restore token on filesystem.
+     *
+     * @return Path of token that includes portal implementation as suffix (e.g. .gnome, .kde).
+     */
+    static std::string path() {
+      return get_file_path();
+    }
+
+    /**
      * @brief Save current state to its backing store.
      */
     static void save() {
@@ -117,7 +126,67 @@ namespace portal {
   private:
     static inline const std::unique_ptr<std::string> token_ = std::make_unique<std::string>();
 
+    /**
+     * @brief Get active Portal backend type currently in use via DBus call.
+     *        Note that the 'gtk' implementation is ignored, as it can be
+     *        active as a fallback service with no Remote Desktop capabilities.
+     *
+     * @return Portal implementation as string.
+     */
+    static std::string get_active_portal_backend() {
+      auto conn = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+      if (!conn) {
+        return "";
+      }
+
+      auto reply = g_dbus_connection_call_sync(
+        conn,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/dbus",
+        "org.freedesktop.DBus",
+        "ListNames",
+        nullptr,
+        G_VARIANT_TYPE("(as)"),
+        G_DBUS_CALL_FLAGS_NONE,
+        -1,
+        nullptr,
+        nullptr
+      );
+
+      if (!reply) {
+        g_clear_object(&conn);
+        return "";
+      }
+
+      GVariantIter iter;
+      gchar *name = nullptr;
+      std::string active_backend = "";
+
+      GVariant *array = g_variant_get_child_value(reply, 0);
+      g_variant_iter_init(&iter, array);
+
+      while (g_variant_iter_loop(&iter, "s", &name)) {
+        std::string service(name);
+        if (service.rfind("org.freedesktop.impl.portal.desktop.", 0) == 0 && !(service.rfind("org.freedesktop.impl.portal.desktop.gtk", 0) == 0)) {
+          // Found a portal backend service name (e.g., "...desktop.gnome")
+          active_backend = service.substr(sizeof("org.freedesktop.impl.portal.desktop.") - 1);
+          g_free(name);
+          break;
+        }
+      }
+
+      g_variant_unref(array);
+      g_variant_unref(reply);
+      g_clear_object(&conn);
+
+      return active_backend;
+    }
+
     static std::string get_file_path() {
+      std::string active_portal = get_active_portal_backend();
+      if (!active_portal.empty()) {
+        return platf::appdata().string() + "/portal_token." + active_portal;
+      }
       return platf::appdata().string() + "/portal_token";
     }
   };
@@ -188,6 +257,15 @@ namespace portal {
     std::string request_path;  ///< For Request.Close() on cancellation.
     GDBusConnection *conn;  ///< Borrowed — owned by the calling dbus_t/portal_t.
   };
+
+  /**
+   * @brief Get path of restore token on filesystem.
+   *
+   * @return Path of token that includes portal implementation as suffix (e.g. .gnome, .kde).
+   */
+  std::string get_saved_token_path() {
+    return restore_token_t::path();
+  }
 
   /**
    * @brief PipeWire stream node and negotiated capture size.
