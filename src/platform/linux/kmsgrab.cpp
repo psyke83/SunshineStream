@@ -40,6 +40,8 @@ namespace platf {
 
   namespace kms {
 
+    class card_t;  ///< Forward declaration for privileged_drm_worker.
+
     namespace {  // Keep privileged implementation details anonymous/local to this translation unit
 
 #if !defined(__FreeBSD__)
@@ -86,50 +88,55 @@ namespace platf {
        * @brief Set up privileged worker thread exclusively for handling DRM capture resources.
        */
       class privileged_drm_worker {
-      public:
-        static void ensure_started() {
-          instance();
-        }
-
-        static void drop_worker_privileges() {
-          instance().drop_privileges();
-        }
-
-        // deliberately align prototype to match path signature via init(const char *path)
-        static int open_drm_card_fd_privileged(const char *path) {
-          try {
-            return instance().run([path] {
-              return platf::open_drm_card_fd(path);
-            });
-          } catch (const privileged_drm_worker_stopped &) {
-            return -1;
-          }
-        }
-
-        static drmModeFB2Ptr drmModeGetFB2_privileged(int fd, uint32_t bufferId) {
-          try {
-            return instance().run([fd, bufferId] {
-              return drmModeGetFB2(fd, bufferId);
-            });
-          } catch (const privileged_drm_worker_stopped &) {
-            return nullptr;
-          }
-        }
-
-        static drmModeFBPtr drmModeGetFB_privileged(int fd, uint32_t bufferId) {
-          try {
-            return instance().run([fd, bufferId] {
-              return drmModeGetFB(fd, bufferId);
-            });
-          } catch (const privileged_drm_worker_stopped &) {
-            return nullptr;
-          }
-        }
+        friend class kms::card_t;  ///< Callers: card_t::init(), card_t::fb().
 
       private:
         static privileged_drm_worker &instance() {
-          static privileged_drm_worker w;
-          return w;
+          static privileged_drm_worker worker;
+          return worker;
+        }
+
+        /**
+         * @brief Run a function via the privileged worker and capture its errno value.
+         *
+         * @param f Function to execute.
+         * @return Pair containing the function result and worker thread errno value.
+         */
+        template<class F>
+        static auto run_with_errno(F &&f) {
+          return instance().run([f = std::forward<F>(f)]() mutable {
+            errno = 0;
+            const auto result = f();
+            const auto errno_value = errno;
+            return std::pair {result, errno_value};
+          });
+        }
+
+        template<class F>
+        auto run(F &&f, const std::source_location &loc = std::source_location::current()) -> std::invoke_result_t<F> {
+          if (std::this_thread::get_id() == worker_thread_id_) {
+            return f();
+          }
+          using R = std::invoke_result_t<F>;
+          auto task = std::make_shared<std::packaged_task<R()>>(
+            [f = std::forward<F>(f)]() mutable -> R {
+#if !defined(__FreeBSD__)
+              cap_sys_admin admin;
+#endif
+              return f();
+            }
+          );
+          auto fut = task->get_future();
+
+          if (!queue_.raise([task]() mutable {
+                (*task)();
+              })) {
+            throw privileged_drm_worker_stopped {
+              "privileged_drm_worker: task rejected in "s + loc.function_name() + " (worker stopping)"s
+            };
+          }
+
+          return fut.get();
         }
 
         void drop_privileges() {
@@ -157,36 +164,49 @@ namespace platf {
                 (*task)();
               }
             }} {
+          worker_thread_id_ = thread_.get_id();
         }
 
         ~privileged_drm_worker() {
           queue_.stop();
         }
 
-        template<class F>
-        auto run(F &&f) -> std::invoke_result_t<F> {
-          using R = std::invoke_result_t<F>;
-          auto task = std::make_shared<std::packaged_task<R()>>(
-            [f = std::forward<F>(f)]() mutable -> R {
-#if !defined(__FreeBSD__)
-              cap_sys_admin admin;
-#endif
-              return f();
-            }
-          );
-          auto fut = task->get_future();
-
-          if (!queue_.raise([task]() mutable {
-                (*task)();
-              })) {
-            throw privileged_drm_worker_stopped {"privileged_drm_worker: task rejected (worker stopping)"};
-          }
-
-          return fut.get();
-        }
-
         safe::queue_t<std::function<void()>> queue_ {32, safe::queue_t<std::function<void()>>::overflow_policy_e::reject};
         std::jthread thread_;
+        std::thread::id worker_thread_id_;
+
+      public:
+        static void ensure_started() {
+          instance();
+        }
+
+        static void drop_worker_privileges() {
+          instance().drop_privileges();
+        }
+
+        /**
+         * @brief Open a DRM card file descriptor in the privileged worker thread.
+         *        Note: prototype aligned to match path signature via init(const char *path).
+         *
+         * @param path Path to the DRM device node.
+         * @return File descriptor on success, or -1 on failure.
+         */
+        static int open_drm_card_fd_privileged(const char *path) {
+          try {
+            const auto [result, errno_value] = run_with_errno([path] {
+              return platf::open_drm_card_fd(path);
+            });
+
+            if (!result) {
+              errno = errno_value;
+            }
+
+            return result;
+          } catch (const privileged_drm_worker_stopped &err) {
+            BOOST_LOG(error) << err.what();
+            return -1;
+          }
+        }
       };
     }  // namespace
 
@@ -266,19 +286,30 @@ namespace platf {
       }
 
       ~wrapper_fb() {
-        std::ranges::for_each(handles, [&](auto &handle) {
-          if (handle) {
-            struct drm_gem_close close_args = {};
-            close_args.handle = handle;
+        try {
+          std::ranges::for_each(handles, [&](auto &handle) {
+            if (handle) {
+              struct drm_gem_close close_args = {};
+              close_args.handle = handle;
 
-            drmIoctl(card_fd, DRM_IOCTL_GEM_CLOSE, &close_args);
+              drmIoctl(
+                card_fd,
+                DRM_IOCTL_GEM_CLOSE,
+                &close_args
+              );
+            }
+          });
+
+          if (fb) {
+            drmModeFreeFB(fb);
+          } else if (fb2) {
+            drmModeFreeFB2(fb2);
           }
-        });
 
-        if (fb) {
-          drmModeFreeFB(fb);
-        } else if (fb2) {
-          drmModeFreeFB2(fb2);
+        } catch (const std::exception &err) {
+          BOOST_LOG(error) << "Exception during DRM framebuffer cleanup: "sv << err.what();
+        } catch (...) {
+          BOOST_LOG(error) << "Exception during DRM framebuffer cleanup: unknown exception"sv;
         }
       }
 
@@ -593,55 +624,62 @@ namespace platf {
        * @return 0 on success; nonzero or negative platform status on failure.
        */
       int init(const char *path) {
-        fd.el = platf::kms::privileged_drm_worker::open_drm_card_fd_privileged(path);
-        if (fd.el < 0) {
-          return -1;
-        }
+        try {
+          return platf::kms::privileged_drm_worker::instance().run([this, path]() -> int {
+            fd.el = open_drm_card_fd(path);
+            if (fd.el < 0) {
+              return -1;
+            }
 
-        version_t ver {drmGetVersion(fd.el)};
-        BOOST_LOG(info) << path << " -> "sv << ((ver && ver->name) ? ver->name : "UNKNOWN");
+            version_t ver {drmGetVersion(fd.el)};
+            BOOST_LOG(info) << path << " -> "sv << ((ver && ver->name) ? ver->name : "UNKNOWN");
 
-        // Open the render node for this card to share with libva.
-        // If it fails, we'll just share the primary node instead.
-        char *rendernode_path = drmGetRenderDeviceNameFromFd(fd.el);
-        if (rendernode_path) {
-          BOOST_LOG(debug) << "Opening render node: "sv << rendernode_path;
-          render_fd.el = open(rendernode_path, O_RDWR);
-          if (render_fd.el < 0) {
-            BOOST_LOG(warning) << "Couldn't open render node: "sv << rendernode_path << ": "sv << strerror(errno);
-            render_fd.el = dup(fd.el);
-          }
-          free(rendernode_path);
-        } else {
-          BOOST_LOG(warning) << "No render device name for: "sv << path;
-          render_fd.el = dup(fd.el);
-        }
+            // Open the render node for this card to share with libva.
+            // If it fails, we'll just share the primary node instead.
+            char *rendernode_path = drmGetRenderDeviceNameFromFd(fd.el);
+            if (rendernode_path) {
+              BOOST_LOG(debug) << "Opening render node: "sv << rendernode_path;
+              render_fd.el = open(rendernode_path, O_RDWR);
+              if (render_fd.el < 0) {
+                BOOST_LOG(warning) << "Couldn't open render node: "sv << rendernode_path << ": "sv << strerror(errno);
+                render_fd.el = dup(fd.el);
+              }
+              free(rendernode_path);
+            } else {
+              BOOST_LOG(warning) << "No render device name for: "sv << path;
+              render_fd.el = dup(fd.el);
+            }
 
-        if (drmSetClientCap(fd.el, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1)) {
-          BOOST_LOG(error) << "GPU driver doesn't support universal planes: "sv << path;
-          return -1;
-        }
+            if (drmSetClientCap(fd.el, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1)) {
+              BOOST_LOG(error) << "GPU driver doesn't support universal planes: "sv << path;
+              return -1;
+            }
 
-        if (drmSetClientCap(fd.el, DRM_CLIENT_CAP_ATOMIC, 1)) {
-          BOOST_LOG(warning) << "GPU driver doesn't support atomic mode-setting: "sv << path;
+            if (drmSetClientCap(fd.el, DRM_CLIENT_CAP_ATOMIC, 1)) {
+              BOOST_LOG(warning) << "GPU driver doesn't support atomic mode-setting: "sv << path;
 #if defined(SUNSHINE_BUILD_X11)
-          // We won't be able to capture the mouse cursor with KMS on non-atomic drivers,
-          // so fall back to X11 if it's available and the user didn't explicitly force KMS.
-          if (window_system == window_system_e::X11 && config::video.capture != "kms") {
-            BOOST_LOG(info) << "Avoiding KMS capture under X11 due to lack of atomic mode-setting"sv;
-            return -1;
-          }
+              // We won't be able to capture the mouse cursor with KMS on non-atomic drivers,
+              // so fall back to X11 if it's available and the user didn't explicitly force KMS.
+              if (window_system == window_system_e::X11 && config::video.capture != "kms") {
+                BOOST_LOG(info) << "Avoiding KMS capture under X11 due to lack of atomic mode-setting"sv;
+                return -1;
+              }
 #endif
-          BOOST_LOG(warning) << "Cursor capture may fail without atomic mode-setting support!"sv;
-        }
+              BOOST_LOG(warning) << "Cursor capture may fail without atomic mode-setting support!"sv;
+            }
 
-        plane_res.reset(drmModeGetPlaneResources(fd.el));
-        if (!plane_res) {
-          BOOST_LOG(error) << "Couldn't get drm plane resources"sv;
+            plane_res.reset(drmModeGetPlaneResources(fd.el));
+            if (!plane_res) {
+              BOOST_LOG(error) << "Couldn't get drm plane resources"sv;
+              return -1;
+            }
+
+            return 0;
+          });
+        } catch (const privileged_drm_worker_stopped &err) {
+          BOOST_LOG(error) << err.what();
           return -1;
         }
-
-        return 0;
       }
 
       /**
@@ -651,17 +689,24 @@ namespace platf {
        * @return Framebuffer metadata wrapper, or nullptr when the framebuffer cannot be read.
        */
       fb_t fb(plane_t::pointer plane) {
-        auto fb2 = platf::kms::privileged_drm_worker::drmModeGetFB2_privileged(fd.el, plane->fb_id);
-        if (fb2) {
-          return std::make_unique<wrapper_fb>(fd.el, fb2);
-        }
+        try {
+          return platf::kms::privileged_drm_worker::instance().run([this, plane]() -> fb_t {
+            auto fb2 = drmModeGetFB2(fd.el, plane->fb_id);
+            if (fb2) {
+              return std::make_unique<wrapper_fb>(fd.el, fb2);
+            }
 
-        auto fb = platf::kms::privileged_drm_worker::drmModeGetFB_privileged(fd.el, plane->fb_id);
-        if (fb) {
-          return std::make_unique<wrapper_fb>(fd.el, fb);
-        }
+            auto fb = drmModeGetFB(fd.el, plane->fb_id);
+            if (fb) {
+              return std::make_unique<wrapper_fb>(fd.el, fb);
+            }
 
-        return nullptr;
+            return nullptr;
+          });
+        } catch (const privileged_drm_worker_stopped &err) {
+          BOOST_LOG(error) << err.what();
+          return nullptr;
+        }
       }
 
       /**
