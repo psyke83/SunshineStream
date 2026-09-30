@@ -42,8 +42,6 @@ namespace platf {
 
     class card_t;  ///< Forward declaration for privileged_drm_worker.
 
-    namespace {  // Keep privileged implementation details anonymous/local to this translation unit
-
 #if !defined(__FreeBSD__)
       /**
        * @brief Temporarily owns CAP_SYS_ADMIN while opening DRM capture resources.
@@ -75,6 +73,8 @@ namespace platf {
         cap_t caps;  ///< Caps.
       };
 #endif
+
+    namespace {  // Keep privileged implementation details anonymous/local to this translation unit
 
       /**
        * @brief Reports that the privileged DRM worker rejected a task.
@@ -627,6 +627,7 @@ namespace platf {
       int init(const char *path) {
         try {
           return platf::kms::privileged_drm_worker::instance().run([this, path]() -> int {
+            cap_sys_admin admin;
             platf::has_elevated_privileges(true, std::source_location::current().function_name());
             fd.el = open_drm_card_fd(path);
             if (fd.el < 0) {
@@ -693,6 +694,7 @@ namespace platf {
       fb_t fb(plane_t::pointer plane) {
         try {
           return platf::kms::privileged_drm_worker::instance().run([this, plane]() -> fb_t {
+            cap_sys_admin admin;
             platf::has_elevated_privileges(true, std::source_location::current().function_name());
             auto fb2 = drmModeGetFB2(fd.el, plane->fb_id);
             if (fb2) {
