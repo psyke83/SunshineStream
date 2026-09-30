@@ -818,6 +818,13 @@ namespace platf {
             conn->connector_id,
             conn->connection == DRM_MODE_CONNECTED,
           });
+
+          BOOST_LOG(debug)
+            << "KMS connector: id=" << conn->connector_id
+            << ", type=" << drmModeGetConnectorTypeName(conn->connector_type)
+            << ", type_id(kernel)=" << conn->connector_type_id
+            << ", index(self-computed)=" << conn_type_count[conn->connector_type]
+            << ", crtc_id=" << crtc_id;
         });
 
         return monitors;
