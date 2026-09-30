@@ -1662,6 +1662,8 @@ namespace platf {
 
   void drop_elevated_privileges(bool all_caps) {
 #if !defined(__FreeBSD__)
+    return; ///< Testing!
+
     bool failed = false;
     const auto caps_to_drop = all_caps ? ELEVATED_PRIVILEGES_FULL : ELEVATED_PRIVILEGES_ADMIN;
     const cap_t caps = cap_get_proc();
