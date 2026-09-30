@@ -210,6 +210,7 @@ namespace platf {
    */
   int open_drm_card_fd(const std::filesystem::path &path, int flags) {
 #ifdef SUNSHINE_BUILD_DRM
+    platf::has_elevated_privileges(true, std::source_location::current().function_name());
     int fd = open(path.c_str(), flags | O_CLOEXEC);
     if (fd < 0) {
       BOOST_LOG(error) << "Couldn't open: "sv << path.string() << ": "sv << strerror(errno);
@@ -1627,10 +1628,12 @@ namespace platf {
   constexpr std::span<const cap_value_t> ELEVATED_PRIVILEGES_ADMIN {ADMIN_CAPS};  ///< Protocol or platform constant for elevated privileges admin.
 #endif
 
-  bool has_elevated_privileges(bool all_caps) {
+  bool has_elevated_privileges(bool all_caps, std::string calling_func) {
 #if !defined(__FreeBSD__)
     const auto caps_to_check = all_caps ? ELEVATED_PRIVILEGES_FULL : ELEVATED_PRIVILEGES_ADMIN;
     const cap_t caps = cap_get_proc();
+    bool has_eff_caps = false;
+    bool has_perm_caps = false;
     if (!caps) {
       BOOST_LOG(error) << "[misc] has_elevated_privileges failed to get process capabilities."sv;
       return false;
@@ -1639,21 +1642,22 @@ namespace platf {
       cap_flag_value_t cap_flags_value;
       cap_get_flag(caps, c, CAP_EFFECTIVE, &cap_flags_value);
       if (cap_flags_value == CAP_SET) {
-        BOOST_LOG(debug) << "[misc] has_elevated_privileges found effective cap:"sv << c;
-        return true;
+        BOOST_LOG(debug) << "[misc] has_elevated_privileges found effective cap:"sv << c << " " << calling_func;
+        has_eff_caps = true;
       }
     }
     for (const auto c : caps_to_check) {
       cap_flag_value_t cap_flags_value;
       cap_get_flag(caps, c, CAP_PERMITTED, &cap_flags_value);
       if (cap_flags_value == CAP_SET) {
-        BOOST_LOG(debug) << "[misc] has_elevated_privileges found permitted cap:"sv << c;
-        return true;
+        BOOST_LOG(debug) << "[misc] has_elevated_privileges found permitted cap:"sv << c << " " << calling_func;
+        has_perm_caps = true;
       }
     }
     cap_free(caps);
 #endif
-    return false;
+    BOOST_LOG(debug) << "[misc] has_elevated_privileges matrix: "sv << std::noboolalpha << "permitted:" << has_perm_caps << " effective:" << has_eff_caps << " " << calling_func;
+    return has_perm_caps || has_eff_caps;
   }
 
   void drop_elevated_privileges(bool all_caps) {

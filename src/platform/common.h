@@ -1353,7 +1353,7 @@ namespace platf {
    * @param all_caps Bool that specifies whether to check all caps or only CAP_SYS_ADMIN
    * @return True if capabilities specified to be checked are present.
    */
-  bool has_elevated_privileges(bool all_caps);
+  bool has_elevated_privileges(bool all_caps, std::string calling_func = "");
 
   /**
    * @brief Drop elevated privileges (e.g. system admin/nice etc.)

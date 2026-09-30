@@ -536,6 +536,7 @@ namespace platf {
        * @brief Load next valid plane.
        */
       void load_next_valid_plane() {
+        platf::has_elevated_privileges(true, std::source_location::current().function_name());
         this->plane.reset();
 
         for (; plane_p != end; ++plane_p) {
@@ -626,6 +627,7 @@ namespace platf {
       int init(const char *path) {
         try {
           return platf::kms::privileged_drm_worker::instance().run([this, path]() -> int {
+            platf::has_elevated_privileges(true, std::source_location::current().function_name());
             fd.el = open_drm_card_fd(path);
             if (fd.el < 0) {
               return -1;
@@ -691,6 +693,7 @@ namespace platf {
       fb_t fb(plane_t::pointer plane) {
         try {
           return platf::kms::privileged_drm_worker::instance().run([this, plane]() -> fb_t {
+            platf::has_elevated_privileges(true, std::source_location::current().function_name());
             auto fb2 = drmModeGetFB2(fd.el, plane->fb_id);
             if (fb2) {
               return std::make_unique<wrapper_fb>(fd.el, fb2);
@@ -716,6 +719,7 @@ namespace platf {
        * @return Owning pointer to the DRM CRTC object.
        */
       crtc_t crtc(std::uint32_t id) {
+        platf::has_elevated_privileges(true, std::source_location::current().function_name());
         return drmModeGetCrtc(fd.el, id);
       }
 
@@ -726,6 +730,7 @@ namespace platf {
        * @return Owning pointer to the DRM encoder object.
        */
       encoder_t encoder(std::uint32_t id) {
+        platf::has_elevated_privileges(true, std::source_location::current().function_name());
         return drmModeGetEncoder(fd.el, id);
       }
 
@@ -735,6 +740,7 @@ namespace platf {
        * @return DRM card resource list.
        */
       res_t res() {
+        platf::has_elevated_privileges(true, std::source_location::current().function_name());
         return drmModeGetResources(fd.el);
       }
 
@@ -825,6 +831,7 @@ namespace platf {
        * @return Owning pointer to the DRM connector object.
        */
       connector_interal_t connector(std::uint32_t id) {
+        platf::has_elevated_privileges(true, std::source_location::current().function_name());
         return drmModeGetConnector(fd.el, id);
       }
 
@@ -849,6 +856,13 @@ namespace platf {
 
           if (conn->encoder_id) {
             auto enc = encoder(conn->encoder_id);
+
+            BOOST_LOG(debug)
+              << "KMS connector: id=" << conn->connector_id
+              << ", encoder_id=" << conn->encoder_id
+              << ", encoder=" << (enc ? "valid" : "null")
+              << ", encoder_crtc_id=" << (enc ? enc->crtc_id : 0);
+
             if (enc) {
               crtc_id = enc->crtc_id;
             }
@@ -945,6 +959,7 @@ namespace platf {
        * @return Plane metadata for the requested DRM plane.
        */
       plane_t operator[](std::uint32_t index) {
+        platf::has_elevated_privileges(true, std::source_location::current().function_name());
         return drmModeGetPlane(fd.el, plane_res->planes[index]);
       }
 
@@ -1392,6 +1407,7 @@ namespace platf {
        * @brief Update cached cursor-plane image and position.
        */
       void update_cursor() {
+        platf::has_elevated_privileges(true, std::source_location::current().function_name());
         if (cursor_plane_id < 0) {
           return;
         }
@@ -1578,6 +1594,7 @@ namespace platf {
        * @return Capture status after refreshing framebuffer and cursor state.
        */
       inline capture_e refresh(file_t *file, egl::surface_descriptor_t *sd, std::optional<std::chrono::steady_clock::time_point> &frame_timestamp) {
+        platf::has_elevated_privileges(true, std::source_location::current().function_name());
         // Check for a change in HDR metadata
         if (connector_id) {
           auto connector_props = card.connector_props(*connector_id);
